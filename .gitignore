@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+.pnpm-debug.log
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# WebStorm
+.idea/
+*.iml
+*.iws
+*.ipr
+.idea_modules/
+
+# OS
+.DS_Store
+Thumbs.db
