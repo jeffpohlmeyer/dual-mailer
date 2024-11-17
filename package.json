@@ -70,5 +70,9 @@
     "initialVersion": "0.0.1",
     "preset": "conventionalcommits",
     "firstRelease": "0.0.1"
+  },
+  "dependencies": {
+    "nodemailer": "^6.9.16",
+    "nodemailer-mailgun-transport": "^2.1.5"
   }
 }
