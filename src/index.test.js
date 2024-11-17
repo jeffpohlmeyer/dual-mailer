@@ -1,4 +1,3 @@
-// src/index.test.js
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { DualMailer } from './index.js';
 import nodemailer from 'nodemailer';
@@ -6,279 +5,306 @@ import mg from 'nodemailer-mailgun-transport';
 
 // Mock nodemailer
 vi.mock('nodemailer', () => ({
-  default: {
-    createTransport: vi.fn(() => ({
-      verify: vi.fn().mockResolvedValue(true),
-      sendMail: vi.fn().mockResolvedValue({
-        accepted: ['test@example.com'],
-        response: 'OK'
-      }),
-      isIdle: vi.fn().mockReturnValue(true),
-      close: vi.fn().mockResolvedValue(true)
-    }))
-  }
+	default: {
+		createTransport: vi.fn(() => ({
+			verify: vi.fn().mockResolvedValue(true),
+			sendMail: vi.fn().mockResolvedValue({
+				accepted: ['test@example.com'],
+				response: 'OK'
+			}),
+			isIdle: vi.fn().mockReturnValue(true),
+			close: vi.fn().mockResolvedValue(true)
+		}))
+	}
 }));
 
 // Mock mailgun transport
 vi.mock('nodemailer-mailgun-transport', () => {
-  return {
-    default: vi.fn((config) => ({
-      name: 'mailgun',
-      version: '1.0.0',
-      ...config
-    }))
-  }
+	return {
+		default: vi.fn((config) => ({
+			name: 'mailgun',
+			version: '1.0.0',
+			...config
+		}))
+	};
 });
 
 describe('DualMailer', () => {
-  let mailer;
+	let mailer;
 
-  // Basic config for Mailgun only
-  const mailgun_config = {
-    mailgun_api_key: 'test-key',
-    mailgun_domain: 'test.com',
-    noreply_email: 'noreply@test.com'
-  };
+	// Different configuration scenarios
+	const mailgun_config = {
+		mailgun_api_key: 'test-key',
+		mailgun_domain: 'test.com'
+	};
 
-  // Full config including SMTP
-  const full_config = {
-    ...mailgun_config,
-    host: 'smtp.test.com',
-    port: 587,
-    password: 'test-password'
-  };
+	const basic_smtp_config = {
+		host: 'smtp.test.com',
+		port: 587
+	};
 
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
+	const authenticated_smtp_config = {
+		...basic_smtp_config,
+		user: 'test-user',
+		password: 'test-password'
+	};
 
-  afterEach(async () => {
-    if (mailer) {
-      await mailer.destroy();
-    }
-  });
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
 
-  describe('Constructor', () => {
-    it('should create instance with minimal config', () => {
-      mailer = new DualMailer(mailgun_config);
-      expect(mailer).toBeInstanceOf(DualMailer);
-    });
+	afterEach(async () => {
+		if (mailer) {
+			await mailer.destroy();
+		}
+	});
 
-    it('should create instance with full config', () => {
-      mailer = new DualMailer(full_config);
-      expect(mailer).toBeInstanceOf(DualMailer);
-    });
+	describe('Constructor', () => {
+		it('should create instance with Mailgun config', () => {
+			mailer = new DualMailer(mailgun_config);
+			expect(mailer).toBeInstanceOf(DualMailer);
+		});
 
-    it('should throw without required Mailgun config', () => {
-      expect(() => new DualMailer({})).toThrow('Mailgun API key is required');
-      expect(() => new DualMailer({ mailgun_api_key: 'key' })).toThrow('Mailgun domain is required');
-      expect(() => new DualMailer({ mailgun_domain: 'domain' })).toThrow('Mailgun API key is required');
-    });
+		it('should create instance with basic SMTP config', () => {
+			mailer = new DualMailer(basic_smtp_config);
+			expect(mailer).toBeInstanceOf(DualMailer);
+		});
 
-    it('should throw with partial SMTP config', () => {
-      const partial_smtp = {
-        ...mailgun_config,
-        host: 'smtp.test.com', // Only providing host
-      };
-      expect(() => new DualMailer(partial_smtp)).toThrow('SMTP port is required');
-    });
-  });
+		it('should create instance with authenticated SMTP config', () => {
+			mailer = new DualMailer(authenticated_smtp_config);
+			expect(mailer).toBeInstanceOf(DualMailer);
+		});
 
-  describe('Mailgun Mode', () => {
-    beforeEach(() => {
-      mailer = new DualMailer(mailgun_config);
-    });
+		it('should throw without any valid transport config', () => {
+			expect(() => new DualMailer({})).toThrow(
+				'Must provide either SMTP (host + port) or Mailgun (api_key + domain) configuration'
+			);
+		});
 
-    it('should send email using Mailgun', async () => {
-      const email_data = {
-        to: 'test@example.com',
-        subject: 'Test',
-        html: {
-          title: 'Test',
-          body: '<p>Test</p>'
-        }
-      };
+		it('should validate complete configurations', () => {
+			// Valid Mailgun
+			expect(() => new DualMailer(mailgun_config)).not.toThrow();
 
-      await mailer.send_mail(email_data);
+			// Valid SMTP
+			expect(() => new DualMailer(basic_smtp_config)).not.toThrow();
 
-      expect(mg).toHaveBeenCalledWith({
-        auth: {
-          api_key: mailgun_config.mailgun_api_key,
-          domain: mailgun_config.mailgun_domain
-        }
-      });
-    });
+			// Valid authenticated SMTP
+			expect(() => new DualMailer(authenticated_smtp_config)).not.toThrow();
 
-    it('should use default noreply email when from is not provided', async () => {
-      const email_data = {
-        to: 'test@example.com',
-        subject: 'Test',
-        html: {
-          title: 'Test',
-          body: '<p>Test</p>'
-        }
-      };
+			// Invalid - neither complete config
+			expect(() => new DualMailer({ host: 'test.com' })).toThrow(
+				'Must provide either SMTP (host + port) or Mailgun (api_key + domain) configuration'
+			);
 
-      await mailer.send_mail(email_data);
+			expect(() => new DualMailer({ mailgun_api_key: 'key' })).toThrow(
+				'Must provide either SMTP (host + port) or Mailgun (api_key + domain) configuration'
+			);
+		});
 
-      const transporter_instance = nodemailer.createTransport.mock.results[0].value;
-      const send_mail_call = transporter_instance.sendMail.mock.calls[0][0];
-      expect(send_mail_call.from).toBe(`No Reply <${mailgun_config.noreply_email}>`);
-    });
-  });
+		it('should throw with SMTP auth password but no user', () => {
+			expect(
+				() =>
+					new DualMailer({
+						...basic_smtp_config,
+						password: 'test-pass'
+					})
+			).toThrow('SMTP user is required when password is provided');
+		});
 
-  describe('SMTP Mode', () => {
-    beforeEach(() => {
-      mailer = new DualMailer(full_config);
-    });
+		it('should throw with SMTP auth user but no password', () => {
+			expect(
+				() =>
+					new DualMailer({
+						...basic_smtp_config,
+						user: 'test-user'
+					})
+			).toThrow('SMTP password is required when user is provided');
+		});
+	});
 
-    it('should send email using SMTP when user is provided', async () => {
-      const email_data = {
-        to: 'test@example.com',
-        subject: 'Test',
-        user: 'smtp@test.com',
-        html: {
-          title: 'Test',
-          body: '<p>Test</p>'
-        }
-      };
+	describe('Mailgun Transport', () => {
+		beforeEach(() => {
+			mailer = new DualMailer(mailgun_config);
+		});
 
-      await mailer.send_mail(email_data);
+		it('should send email using Mailgun transport', async () => {
+			const email_data = {
+				to: 'test@example.com',
+				subject: 'Test',
+				html: {
+					title: 'Test',
+					body: '<p>Test</p>'
+				}
+			};
 
-      expect(nodemailer.createTransport).toHaveBeenCalledWith(
-        expect.objectContaining({
-          host: full_config.host,
-          port: full_config.port,
-          auth: {
-            user: email_data.user,
-            pass: full_config.password
-          }
-        })
-      );
-    });
+			await mailer.send_mail(email_data);
 
-    it('should throw when trying to use SMTP without SMTP config', async () => {
-      mailer = new DualMailer(mailgun_config);
+			expect(mg).toHaveBeenCalledWith({
+				auth: {
+					api_key: mailgun_config.mailgun_api_key,
+					domain: mailgun_config.mailgun_domain
+				}
+			});
+		});
+	});
 
-      const email_data = {
-        to: 'test@example.com',
-        subject: 'Test',
-        user: 'smtp@test.com',
-        html: {
-          title: 'Test',
-          body: '<p>Test</p>'
-        }
-      };
+	describe('SMTP Transport', () => {
+		it('should send email using basic SMTP', async () => {
+			mailer = new DualMailer(basic_smtp_config);
 
-      await expect(() => mailer.send_mail(email_data))
-        .rejects
-        .toThrow('SMTP configuration is required');
-    });
-  });
+			const email_data = {
+				to: 'test@example.com',
+				subject: 'Test',
+				html: {
+					title: 'Test',
+					body: '<p>Test</p>'
+				}
+			};
 
-  describe('Transport Management', () => {
-    beforeEach(() => {
-      mailer = new DualMailer(full_config);
-    });
+			await mailer.send_mail(email_data);
 
-    it('should create new transporter after max emails per transporter', async () => {
-      const email_data = {
-        to: 'test@example.com',
-        subject: 'Test',
-        html: {
-          title: 'Test',
-          body: '<p>Test</p>'
-        }
-      };
+			expect(nodemailer.createTransport).toHaveBeenCalledWith(
+				expect.objectContaining({
+					host: basic_smtp_config.host,
+					port: basic_smtp_config.port,
+					secure: true // default when not in dev mode
+				})
+			);
+		});
 
-      // Send initial email to create transporter
-      await mailer.send_mail(email_data);
+		it('should send email using authenticated SMTP', async () => {
+			mailer = new DualMailer(authenticated_smtp_config);
 
-      // Reset the createTransport mock count
-      nodemailer.createTransport.mockClear();
+			const email_data = {
+				to: 'test@example.com',
+				subject: 'Test',
+				html: {
+					title: 'Test',
+					body: '<p>Test</p>'
+				}
+			};
 
-      // Send enough emails to trigger new transporter creation
-      for (let i = 0; i < 1001; i++) {
-        await mailer.send_mail(email_data);
-      }
+			await mailer.send_mail(email_data);
 
-      // Should create a new transporter after exceeding limit
-      expect(nodemailer.createTransport).toHaveBeenCalled();
-    });
+			expect(nodemailer.createTransport).toHaveBeenCalledWith(
+				expect.objectContaining({
+					host: authenticated_smtp_config.host,
+					port: authenticated_smtp_config.port,
+					secure: true,
+					auth: {
+						user: authenticated_smtp_config.user,
+						pass: authenticated_smtp_config.password
+					}
+				})
+			);
+		});
+	});
 
-    // Alternative approach using multiple emails
-    it('should create different transporters for different users', async () => {
-      const send_with_user = async (user) => {
-        await mailer.send_mail({
-          to: 'test@example.com',
-          subject: 'Test',
-          user,
-          html: {
-            title: 'Test',
-            body: '<p>Test</p>'
-          }
-        });
-      };
+	describe('Transport Management', () => {
+		beforeEach(() => {
+			mailer = new DualMailer(basic_smtp_config);
+		});
 
-      // Send emails with different users
-      await send_with_user('user1@test.com');
-      await send_with_user('user2@test.com');
+		it('should create new transporter after max emails per transporter', async () => {
+			const email_data = {
+				to: 'test@example.com',
+				subject: 'Test',
+				html: {
+					title: 'Test',
+					body: '<p>Test</p>'
+				}
+			};
 
-      // Should create separate transporters for each user
-      expect(nodemailer.createTransport).toHaveBeenCalledTimes(2);
-    });
-  });
+			// Send initial email to create transporter
+			await mailer.send_mail(email_data);
 
-  describe('Development Mode', () => {
-    beforeEach(() => {
-      mailer = new DualMailer({ ...full_config, is_dev: true });
-    });
+			// Reset the createTransport mock count
+			nodemailer.createTransport.mockClear();
 
-    it('should not throw on failed email in dev mode', async () => {
-      const mock_send_mail = vi.fn().mockRejectedValueOnce(new Error('Send failed'));
-      nodemailer.createTransport.mockImplementationOnce(() => ({
-        verify: vi.fn().mockResolvedValue(true),
-        sendMail: mock_send_mail,
-        isIdle: vi.fn().mockReturnValue(true),
-        close: vi.fn().mockResolvedValue(true)
-      }));
+			// Send enough emails to trigger new transporter creation
+			for (let i = 0; i < 1001; i++) {
+				await mailer.send_mail(email_data);
+			}
 
-      const email_data = {
-        to: 'test@example.com',
-        subject: 'Test',
-        html: {
-          title: 'Test',
-          body: '<p>Test</p>'
-        }
-      };
+			// Should create a new transporter after exceeding limit
+			expect(nodemailer.createTransport).toHaveBeenCalled();
+		});
+	});
 
-      await expect(() => mailer.send_mail(email_data)).rejects.toThrow();
-    });
-  });
+	describe('Development Mode', () => {
+		beforeEach(() => {
+			mailer = new DualMailer({ ...basic_smtp_config, is_dev: true });
+		});
 
-  describe('Cleanup', () => {
-    it('should close all transporters on destroy', async () => {
-      mailer = new DualMailer(full_config);
+		it('should not use SSL in dev mode', async () => {
+			const email_data = {
+				to: 'test@example.com',
+				subject: 'Test',
+				html: {
+					title: 'Test',
+					body: '<p>Test</p>'
+				}
+			};
 
-      // Create a few transporters
-      await mailer.send_mail({
-        to: 'test1@example.com',
-        subject: 'Test 1',
-        user: 'user1@test.com',
-        html: { title: 'Test 1', body: '<p>Test 1</p>' }
-      });
+			await mailer.send_mail(email_data);
 
-      await mailer.send_mail({
-        to: 'test2@example.com',
-        subject: 'Test 2',
-        user: 'user2@test.com',
-        html: { title: 'Test 2', body: '<p>Test 2</p>' }
-      });
+			expect(nodemailer.createTransport).toHaveBeenCalledWith(
+				expect.objectContaining({
+					secure: false
+				})
+			);
+		});
 
-      await mailer.destroy();
+		it('should log failed emails in dev mode', async () => {
+			const mock_send_mail = vi.fn().mockRejectedValueOnce(new Error('Send failed'));
+			const mock_console = vi.spyOn(console, 'error'); // Changed to error
 
-      const transporter_instance = nodemailer.createTransport.mock.results[0].value;
-      expect(transporter_instance.close).toHaveBeenCalled();
-    });
-  });
+			nodemailer.createTransport.mockImplementationOnce(() => ({
+				verify: vi.fn().mockResolvedValue(true),
+				sendMail: mock_send_mail,
+				isIdle: vi.fn().mockReturnValue(true),
+				close: vi.fn().mockResolvedValue(true)
+			}));
+
+			const email_data = {
+				to: 'test@example.com',
+				subject: 'Test',
+				html: {
+					title: 'Test',
+					body: '<p>Test</p>'
+				}
+			};
+
+			await expect(mailer.send_mail(email_data)).rejects.toThrow();
+
+			// Verify the error was logged through the default logger
+			expect(mock_console).toHaveBeenCalledWith(
+				expect.objectContaining({
+					level: 'error',
+					message: 'Failed to send email in dev mode',
+					transport: 'SMTP',
+					error: 'Send failed',
+					content: expect.stringContaining('<!doctype html')
+				})
+			);
+		});
+	});
+
+	describe('Cleanup', () => {
+		it('should close all transporters on destroy', async () => {
+			mailer = new DualMailer(basic_smtp_config);
+
+			// Create a transporter
+			await mailer.send_mail({
+				to: 'test@example.com',
+				subject: 'Test',
+				html: { title: 'Test', body: '<p>Test</p>' }
+			});
+
+			await mailer.destroy();
+
+			const transporter_instance = nodemailer.createTransport.mock.results[0].value;
+			expect(transporter_instance.close).toHaveBeenCalled();
+		});
+	});
 });
