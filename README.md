@@ -1,6 +1,6 @@
 # Dual Mailer
 
-A flexible email utility that supports both Mailgun and self-hosted SMTP servers with automatic transport management and retry capabilities. Perfect for applications that need to send emails through different providers.
+A flexible email utility that supports both Mailgun and self-hosted SMTP servers with automatic transport management, rate limiting, and retry capabilities. Perfect for applications that need to send emails through different providers.
 
 ## Features
 
@@ -116,6 +116,32 @@ await mailer.send_mail({
   }
 });
 ```
+
+### Rate Limiting
+
+Dual Mailer supports rate limiting for authenticated SMTP connections. You can configure the rate limiting options when creating the `DualMailer` instance:
+
+```javascript
+const mailer = new DualMailer(config, {
+  rate_limit: {
+    max_connections: 5,
+    max_messages_per_connection: 200,
+    rate_delta: 1000,
+    rate_limit: 5
+  }
+});
+```
+
+The `rate_limit` option accepts the following properties:
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `max_connections` | number | 5 | The maximum number of concurrent SMTP connections |
+| `max_messages_per_connection` | number | 200 | The maximum number of messages per SMTP connection |
+| `rate_delta` | number | 1000 | The time window for rate limiting in milliseconds |
+| `rate_limit` | number | 5 | The maximum number of messages to send within the rate delta |
+
+Rate limiting is only applied to authenticated SMTP connections. For Mailgun, rate limiting is handled by the Mailgun service.
 
 ### Cleanup
 
@@ -246,6 +272,7 @@ try {
 4. Set appropriate timeouts for your use case
 5. For local development, use tools like Mailhog with simple SMTP configuration
 6. Use authenticated SMTP or Mailgun for production environments
+7. Configure appropriate rate limiting settings for your use case
 
 ## License
 

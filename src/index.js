@@ -38,10 +38,19 @@ import mg from 'nodemailer-mailgun-transport';
  */
 
 /**
+ * @typedef {Object} RateLimitConfig
+ * @property {number} [max_connections=5] - Maximum number of concurrent SMTP connections
+ * @property {number} [max_messages_per_connection=200] - Maximum number of messages per SMTP connection
+ * @property {number} [rate_delta=1000] - Time window for rate limiting in milliseconds
+ * @property {number} [rate_limit=5] - Maximum number of messages to send within the rate delta
+ */
+
+/**
  * @typedef {Object} MailerOptions
  * @property {Function} [logger] - Custom logging function (level, message, meta) => void
  * @property {boolean} [silent] - Disable all logging if true
  * @property {RetryConfig} [retry] - Retry configuration
+ * @property {RateLimitConfig} [rate_limit] - Rate limiting configuration
  */
 
 /**
@@ -81,6 +90,8 @@ export class DualMailer {
 	#logger;
 	#retry;
 	#retry_enabled;
+	#rate_limit;
+	#rate_limit_enabled;
 
 	/**
 	 * @param {MailConfig} config
@@ -108,6 +119,16 @@ export class DualMailer {
 
 			// Retries are disabled by default, enable them if options.retry is provided
 			this.#retry_enabled = Boolean(options.retry);
+
+			this.#rate_limit = options.rate_limit ?? {
+				max_connections: 5,
+				max_messages_per_connection: 200,
+				rate_delta: 1000,
+				rate_limit: 5
+			};
+
+			// Rate limits are disabled by default, enable them if options.rate_limit is provided
+			this.#rate_limit_enabled = Boolean(options.rate_limit);
 
 			// Start cleanup if not in dev mode
 			if (!config.is_dev) {
@@ -227,10 +248,10 @@ export class DualMailer {
 
 					// Add pool settings for authenticated SMTP
 					config.pool = true;
-					config.maxConnections = 5;
-					config.maxMessages = 200;
-					config.rateDelta = 1000;
-					config.rateLimit = 5;
+					config.maxConnections = this.#rate_limit.max_connections;
+					config.maxMessages = this.#rate_limit.max_messages_per_connection;
+					config.rateDelta = this.#rate_limit.rate_delta;
+					config.rateLimit = this.#rate_limit.rate_limit;
 				}
 
 				return config;
