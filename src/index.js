@@ -65,7 +65,11 @@ export class DualMailer {
 	#config;
 	#max_transporter_age = 1000 * 60 * 30; // 30 minutes
 	#max_emails_per_transporter = 1000;
+	#max_consecutive_failures = 3;
 	#cleanup_interval;
+	#cleanup_interval_ms = 1000 * 60 * 5; // 5 minutes
+	#max_idle_time = 1000 * 60 * 15; // 15 minutes
+	#verify_timeout = 5000; // 5 seconds
 	#logger;
 
 	/**
@@ -235,7 +239,8 @@ export class DualMailer {
 	}
 
 	/**
-	 * @param {Object} info
+	 * Checks if a transporter should be refreshed based on various criteria
+	 * @param {Object} info - Transporter info
 	 * @returns {boolean}
 	 */
 	#should_refresh_transporter(info) {
@@ -243,29 +248,62 @@ export class DualMailer {
 		const age = now - info.created_at;
 		const idle_time = now - info.last_used;
 
-		return (
+		const should_refresh =
 			age > this.#max_transporter_age ||
 			info.email_count > this.#max_emails_per_transporter ||
-			idle_time > 1000 * 60 * 15 ||
-			!info.transporter.isIdle()
-		);
+			idle_time > this.#max_idle_time ||
+			!info.transporter.isIdle() ||
+			info.consecutive_failures >= this.#max_consecutive_failures;
+
+		if (should_refresh) {
+			const reason = {
+				age: age > this.#max_transporter_age,
+				email_count: info.email_count > this.#max_emails_per_transporter,
+				idle: idle_time > this.#max_idle_time,
+				not_idle: !info.transporter.isIdle(),
+				failures: info.consecutive_failures >= this.#max_consecutive_failures
+			};
+
+			this.#logger('info', 'Transporter refresh needed', { reason });
+		}
+
+		return should_refresh;
 	}
 
 	/**
-	 * @param {Object} info
+	 * Safely closes a transporter with error handling
+	 * @param {Object} info - Transporter info
+	 * @returns {Promise<void>}
 	 */
 	async #close_transporter(info) {
 		try {
-			if (info.transporter?.close) {
-				await info.transporter.close();
+			if (!info.closing) {
+				info.closing = true;
+				if (info.transporter?.close) {
+					await Promise.race([
+						info.transporter.close(),
+						new Promise((_, reject) =>
+							setTimeout(
+								() =>
+									reject(new EmailError('Transporter close timeout', EMAIL_ERROR_CODES.TRANSPORT)),
+								5000
+							)
+						)
+					]);
+				}
 			}
 		} catch (error) {
-			console.error('Error closing transporter:', error);
+			this.#logger('warn', 'Error closing transporter', {
+				error: error.message,
+				code: error instanceof EmailError ? error.code : EMAIL_ERROR_CODES.TRANSPORT
+			});
 		}
 	}
 
 	/**
+	 * Gets or creates a transporter with comprehensive error handling
 	 * @returns {Promise<any>}
+	 * @throws {EmailError} If transporter creation or verification fails
 	 */
 	async #get_transporter() {
 		const key = 'default';
@@ -273,7 +311,20 @@ export class DualMailer {
 
 		if (existing) {
 			try {
-				await existing.transporter.verify();
+				const verify_result = await Promise.race([
+					existing.transporter.verify(),
+					new Promise((_, reject) =>
+						setTimeout(
+							() =>
+								reject(new EmailError('Transporter verify timeout', EMAIL_ERROR_CODES.CONNECTION)),
+							this.#verify_timeout
+						)
+					)
+				]);
+
+				if (!verify_result) {
+					throw new EmailError('Transporter verification failed', EMAIL_ERROR_CODES.CONNECTION);
+				}
 
 				if (this.#should_refresh_transporter(existing)) {
 					await this.#close_transporter(existing);
@@ -282,21 +333,49 @@ export class DualMailer {
 					return existing.transporter;
 				}
 			} catch (error) {
+				this.#logger('warn', 'Transporter verification failed', {
+					error: error.message,
+					code: error instanceof EmailError ? error.code : EMAIL_ERROR_CODES.CONNECTION
+				});
 				await this.#close_transporter(existing);
 				this.#transporter_cache.delete(key);
 			}
 		}
 
-		const config = this.#get_transport_config();
-		const info = {
-			transporter: nodemailer.createTransport(config),
-			created_at: Date.now(),
-			email_count: 0,
-			last_used: Date.now()
-		};
+		try {
+			const config = this.#get_transport_config();
+			const info = {
+				transporter: nodemailer.createTransport(config),
+				created_at: Date.now(),
+				email_count: 0,
+				last_used: Date.now(),
+				consecutive_failures: 0,
+				closing: false
+			};
 
-		this.#transporter_cache.set(key, info);
-		return info.transporter;
+			// Verify new transporter
+			await Promise.race([
+				info.transporter.verify(),
+				new Promise((_, reject) =>
+					setTimeout(
+						() =>
+							reject(
+								new EmailError('Initial transporter verify timeout', EMAIL_ERROR_CODES.CONNECTION)
+							),
+						this.#verify_timeout
+					)
+				)
+			]);
+
+			this.#transporter_cache.set(key, info);
+			return info.transporter;
+		} catch (error) {
+			throw new EmailError(
+				`Failed to create transporter: ${error.message}`,
+				EMAIL_ERROR_CODES.TRANSPORT,
+				error
+			);
+		}
 	}
 
 	/**
@@ -321,26 +400,69 @@ export class DualMailer {
     `;
 	}
 
-	#start_cleanup_interval() {
-		return setInterval(
-			() => {
-				for (const [key, info] of this.#transporter_cache.entries()) {
-					if (this.#should_refresh_transporter(info)) {
-						this.#close_transporter(info).then(() => {
-							this.#transporter_cache.delete(key);
-						});
-					}
+	/**
+	 * Updates transporter metrics after sending
+	 * @param {boolean} success - Whether the send was successful
+	 */
+	#update_transporter_metrics(success) {
+		const info = this.#transporter_cache.get('default');
+		if (info) {
+			info.email_count++;
+			info.last_used = Date.now();
+
+			if (success) {
+				info.consecutive_failures = 0;
+			} else {
+				info.consecutive_failures = (info.consecutive_failures || 0) + 1;
+
+				if (info.consecutive_failures >= this.#max_consecutive_failures) {
+					this.#logger('warn', 'Transporter marked for refresh due to failures', {
+						consecutive_failures: info.consecutive_failures
+					});
 				}
-			},
-			1000 * 60 * 5
-		); // Every 5 minutes
+			}
+		}
 	}
 
 	/**
-	 * Send an email
+	 * Starts the cleanup interval with error handling
+	 * @returns {NodeJS.Timeout}
+	 */
+	#start_cleanup_interval() {
+		return setInterval(async () => {
+			const promises = [];
+
+			for (const [key, info] of this.#transporter_cache.entries()) {
+				if (this.#should_refresh_transporter(info)) {
+					promises.push(
+						this.#close_transporter(info)
+							.then(() => this.#transporter_cache.delete(key))
+							.catch((error) => {
+								this.#logger('error', 'Cleanup error', {
+									error: error.message,
+									code: error instanceof EmailError ? error.code : EMAIL_ERROR_CODES.TRANSPORT
+								});
+							})
+					);
+				}
+			}
+
+			if (promises.length > 0) {
+				try {
+					await Promise.allSettled(promises);
+				} catch (error) {
+					this.#logger('error', 'Cleanup cycle error', {
+						error: error.message,
+						code: error instanceof EmailError ? error.code : EMAIL_ERROR_CODES.TRANSPORT
+					});
+				}
+			}
+		}, this.#cleanup_interval_ms);
+	}
+
+	/**
+	 * Send an email with enhanced error handling and transport management
 	 * @param {EmailDataType} payload - Email data
-	 * @returns {Promise<void>}
-	 * @throws {EmailError} If sending fails
 	 */
 	async send_mail(payload) {
 		const start_time = Date.now();
@@ -379,26 +501,17 @@ export class DualMailer {
 					duration_ms: duration
 				});
 
-				// Update transporter metrics
-				const info = this.#transporter_cache.get('default');
-				if (info) {
-					info.email_count++;
-					info.last_used = Date.now();
-				}
+				this.#update_transporter_metrics(true);
 			} catch (error) {
-				// Handle send failure
+				// Update failure metrics
+				this.#update_transporter_metrics(false);
+
 				if (this.#config.is_dev) {
 					this.#logger('error', 'Failed to send email in dev mode', {
 						error: error.message,
 						content: text ?? html,
 						transport: transport_type
 					});
-				}
-
-				// Force transporter refresh on error
-				const info = this.#transporter_cache.get('default');
-				if (info) {
-					info.email_count = this.#max_emails_per_transporter;
 				}
 
 				throw new EmailError(
@@ -411,7 +524,7 @@ export class DualMailer {
 			const duration = Date.now() - start_time;
 			this.#logger('error', 'Email error occurred', {
 				error: error.message,
-				code: error.code,
+				code: error instanceof EmailError ? error.code : EMAIL_ERROR_CODES.SEND,
 				transport: transport_type,
 				duration_ms: duration,
 				stack: error.stack
@@ -428,16 +541,29 @@ export class DualMailer {
 	}
 
 	/**
-	 * Close all transporters and cleanup
+	 * Cleanly destroys the mailer instance with error handling
 	 */
 	async destroy() {
 		if (this.#cleanup_interval) {
 			clearInterval(this.#cleanup_interval);
 		}
 
+		const promises = [];
 		for (const [key, info] of this.#transporter_cache.entries()) {
-			await this.#close_transporter(info);
-			this.#transporter_cache.delete(key);
+			promises.push(
+				this.#close_transporter(info)
+					.then(() => this.#transporter_cache.delete(key))
+					.catch((error) => {
+						this.#logger('error', 'Destroy cleanup error', {
+							error: error.message,
+							code: error instanceof EmailError ? error.code : EMAIL_ERROR_CODES.TRANSPORT
+						});
+					})
+			);
+		}
+
+		if (promises.length > 0) {
+			await Promise.allSettled(promises);
 		}
 	}
 }
