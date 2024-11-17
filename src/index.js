@@ -31,9 +31,17 @@ import mg from 'nodemailer-mailgun-transport';
  */
 
 /**
+ * @typedef {Object} RetryConfig
+ * @property {number} [maxRetries=3] - Maximum number of retry attempts
+ * @property {number} [retryDelay=1000] - Initial delay between retries in ms (doubles each retry)
+ * @property {string[]} [retryableErrors=[]] - List of error messages to retry on (empty means retry all)
+ */
+
+/**
  * @typedef {Object} MailerOptions
  * @property {Function} [logger] - Custom logging function (level, message, meta) => void
  * @property {boolean} [silent] - Disable all logging if true
+ * @property {RetryConfig} [retry] - Retry configuration
  */
 
 /**
@@ -71,6 +79,8 @@ export class DualMailer {
 	#max_idle_time = 1000 * 60 * 15; // 15 minutes
 	#verify_timeout = 5000; // 5 seconds
 	#logger;
+	#retry;
+	#retry_enabled;
 
 	/**
 	 * @param {MailConfig} config
@@ -89,6 +99,15 @@ export class DualMailer {
 			} else {
 				this.#logger = this.#default_logger;
 			}
+
+			this.#retry = options.retry ?? {
+				max_retries: 3,
+				retry_delay: 1000,
+				retryable_errors: []
+			};
+
+			// Retries are disabled by default, enable them if options.retry is provided
+			this.#retry_enabled = Boolean(options.retry);
 
 			// Start cleanup if not in dev mode
 			if (!config.is_dev) {
@@ -461,82 +480,115 @@ export class DualMailer {
 	}
 
 	/**
-	 * Send an email with enhanced error handling and transport management
-	 * @param {EmailDataType} payload - Email data
+	 * Send an email with retry capability
+	 * @param {EmailDataType} payload
 	 */
 	async send_mail(payload) {
 		const start_time = Date.now();
 		const transport_type = this.#config.host ? 'SMTP' : 'Mailgun';
+		let attempt = 1;
 
-		try {
-			this.#validate_payload(payload);
+		const should_retry = (error, attempt) => {
+			if (!this.#retry_enabled) return false;
+			if (attempt > (this.#retry.maxRetries ?? 3)) return false;
+			if (!this.#retry.retryableErrors?.length) return true;
+			return this.#retry.retryableErrors.some((msg) => error.message.includes(msg));
+		};
 
-			const {
-				to,
-				from = this.#config.noreply_email ? `No Reply <${this.#config.noreply_email}>` : undefined,
-				subject,
-				text,
-				html: html_data,
-				reply_to
-			} = payload;
+		const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-			const html = this.#create_html_email(html_data);
-			const transporter = await this.#get_transporter();
-
-			this.#logger('info', 'Sending email', {
-				to,
-				subject,
-				transport: transport_type
-			});
-
+		while (true) {
 			try {
-				await transporter.sendMail({ from, to, subject, text, html, reply_to });
+				this.#validate_payload(payload);
 
-				// Update metrics and log success
-				const duration = Date.now() - start_time;
-				this.#logger('info', 'Email sent successfully', {
+				const {
+					to,
+					from = this.#config.noreply_email
+						? `No Reply <${this.#config.noreply_email}>`
+						: undefined,
+					subject,
+					text,
+					html: html_data,
+					reply_to
+				} = payload;
+
+				const html = this.#create_html_email(html_data);
+				const transporter = await this.#get_transporter();
+
+				this.#logger('info', 'Sending email', {
 					to,
 					subject,
 					transport: transport_type,
-					duration_ms: duration
+					attempt
 				});
 
-				this.#update_transporter_metrics(true);
-			} catch (error) {
-				// Update failure metrics
-				this.#update_transporter_metrics(false);
+				try {
+					await transporter.sendMail({ from, to, subject, text, html, reply_to });
 
-				if (this.#config.is_dev) {
-					this.#logger('error', 'Failed to send email in dev mode', {
-						error: error.message,
-						content: text ?? html,
-						transport: transport_type
+					// Update metrics and log success
+					const duration = Date.now() - start_time;
+					this.#logger('info', 'Email sent successfully', {
+						to,
+						subject,
+						transport: transport_type,
+						duration_ms: duration,
+						attempts: attempt
 					});
-				}
 
-				throw new EmailError(
-					`Failed to send email: ${error.message}`,
-					EMAIL_ERROR_CODES.SEND,
-					error
-				);
-			}
-		} catch (error) {
-			const duration = Date.now() - start_time;
-			this.#logger('error', 'Email error occurred', {
-				error: error.message,
-				code: error instanceof EmailError ? error.code : EMAIL_ERROR_CODES.SEND,
-				transport: transport_type,
-				duration_ms: duration,
-				stack: error.stack
-			});
+					this.#update_transporter_metrics(true);
+					return; // Success - exit the retry loop
+				} catch (error) {
+					// Update failure metrics
+					this.#update_transporter_metrics(false);
 
-			throw error instanceof EmailError
-				? error
-				: new EmailError(
-						`Unexpected error sending email: ${error.message}`,
+					if (should_retry(error, attempt)) {
+						const delay = (this.#retry.retryDelay ?? 1000) * Math.pow(2, attempt - 1);
+						this.#logger('warn', 'Email send failed, retrying', {
+							error: error.message,
+							attempt,
+							next_attempt_in_ms: delay,
+							transport: transport_type
+						});
+
+						await sleep(delay);
+						attempt++;
+						continue;
+					}
+
+					if (this.#config.is_dev) {
+						this.#logger('error', 'Failed to send email in dev mode', {
+							error: error.message,
+							content: text ?? html,
+							transport: transport_type,
+							attempts: attempt
+						});
+					}
+
+					throw new EmailError(
+						`Failed to send email after ${attempt} attempt(s): ${error.message}`,
 						EMAIL_ERROR_CODES.SEND,
 						error
 					);
+				}
+			} catch (error) {
+				const duration = Date.now() - start_time;
+				this.#logger('error', 'Email error occurred', {
+					error: error.message,
+					code: error instanceof EmailError ? error.code : EMAIL_ERROR_CODES.SEND,
+					transport: transport_type,
+					duration_ms: duration,
+					attempts: attempt,
+					stack: error.stack
+				});
+
+				throw error instanceof EmailError
+					? error
+					: new EmailError(
+							`Unexpected error sending email after ${attempt} attempt(s): ${error.message}`,
+							EMAIL_ERROR_CODES.SEND,
+							error
+						);
+			}
 		}
 	}
 

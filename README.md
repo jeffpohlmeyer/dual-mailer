@@ -1,6 +1,6 @@
 # Dual Mailer
 
-A flexible email utility that supports both Mailgun and self-hosted SMTP servers with automatic transport management. Perfect for applications that need to send emails through different providers.
+A flexible email utility that supports both Mailgun and self-hosted SMTP servers with automatic transport management and retry capabilities. Perfect for applications that need to send emails through different providers.
 
 ## Features
 
@@ -10,6 +10,7 @@ A flexible email utility that supports both Mailgun and self-hosted SMTP servers
 - ⏱️ Automatic cleanup of idle connections
 - 🛡️ Rate limiting for authenticated SMTP connections
 - 🧪 Development mode support
+- ♻️ Automatic retries on failed email sends
 
 ## Installation
 
@@ -66,6 +67,30 @@ await mailer.send_mail({
 });
 ```
 
+### Enabling Retries
+
+To enable retries for email sends, you can pass a `retry` option when creating the `DualMailer` instance:
+
+```javascript
+const mailer = new DualMailer(config, {
+  retry: {
+    max_retries: 3,
+    retry_delay: 1000,
+    retryable_errors: ['Temporary Error']
+  }
+});
+```
+
+The `retry` option accepts the following properties:
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `max_retries` | number | 3 | The maximum number of retry attempts |
+| `retry_delay` | number | 1000 | The initial delay between retries in milliseconds (the delay doubles for each subsequent retry) |
+| `retryable_errors` | string[] | `[]` | A list of error messages that should trigger a retry (if empty, all errors will be retried) |
+
+By default, retries are disabled. To enable them, you need to provide the `retry` option when creating the `DualMailer` instance.
+
 ### Advanced HTML Emails
 
 ```javascript
@@ -114,8 +139,8 @@ await mailer.destroy();
 | `is_dev` | boolean | No | Development mode flag |
 
 \* Required if using SMTP transport (must provide both host and port)  
-\** Required if SMTP user is provided  
-\*** Required if using Mailgun transport (must provide both api_key and domain)
+\*\* Required if SMTP user is provided  
+\*\*\* Required if using Mailgun transport (must provide both api_key and domain)
 
 You must provide either:
 - SMTP configuration (host + port), or
@@ -229,13 +254,3 @@ MIT
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
-
-
-# Dual Mailer
-
-A flexible email utility that supports both Mailgun and self-hosted SMTP servers with automatic transport management. Perfect for applications that need to send emails through different providers.
-
-[Previous sections remain the same until Configuration Options...]
-
-
-[Rest of the README remains the same...]
