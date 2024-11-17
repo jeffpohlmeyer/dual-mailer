@@ -390,7 +390,8 @@ export class DualMailer {
 				if (this.#config.is_dev) {
 					this.#logger('error', 'Failed to send email in dev mode', {
 						error: error.message,
-						content: text ?? html
+						content: text ?? html,
+						transport: transport_type
 					});
 				}
 

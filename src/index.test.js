@@ -257,7 +257,7 @@ describe('DualMailer', () => {
 
 		it('should log failed emails in dev mode', async () => {
 			const mock_send_mail = vi.fn().mockRejectedValueOnce(new Error('Send failed'));
-			const mock_console = vi.spyOn(console, 'log');
+			const mock_console = vi.spyOn(console, 'error'); // Changed to error
 
 			nodemailer.createTransport.mockImplementationOnce(() => ({
 				verify: vi.fn().mockResolvedValue(true),
@@ -275,10 +275,17 @@ describe('DualMailer', () => {
 				}
 			};
 
-			await expect(() => mailer.send_mail(email_data)).rejects.toThrow();
+			await expect(mailer.send_mail(email_data)).rejects.toThrow();
+
+			// Verify the error was logged through the default logger
 			expect(mock_console).toHaveBeenCalledWith(
-				'Sending mail failed. Here is the content:',
-				expect.any(String)
+				expect.objectContaining({
+					level: 'error',
+					message: 'Failed to send email in dev mode',
+					transport: 'SMTP',
+					error: 'Send failed',
+					content: expect.stringContaining('<!doctype html')
+				})
 			);
 		});
 	});
