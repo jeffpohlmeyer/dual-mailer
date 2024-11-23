@@ -2,11 +2,22 @@
   "name": "@jvp/dual-mailer",
   "version": "0.0.2",
   "description": "Dual mailer package",
-  "main": "index.js",
+  "main": "./index.js",
+  "module": "./index.js",
   "type": "module",
   "keywords": [],
   "author": "",
   "license": "MIT",
+  "exports": {
+    ".": {
+      "import": "./index.js",
+      "require": "./index.js"
+    }
+  },
+  "files": [
+    "index.js",
+    "src/**/*"
+  ],
   "scripts": {
     "test": "vitest run --silent",
     "test:watch": "vitest",
