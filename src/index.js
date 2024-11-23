@@ -91,7 +91,6 @@ export class DualMailer {
 	#retry;
 	#retry_enabled;
 	#rate_limit;
-	#rate_limit_enabled;
 
 	/**
 	 * @param {MailConfig} config
@@ -126,9 +125,6 @@ export class DualMailer {
 				rate_delta: 1000,
 				rate_limit: 5
 			};
-
-			// Rate limits are disabled by default, enable them if options.rate_limit is provided
-			this.#rate_limit_enabled = Boolean(options.rate_limit);
 
 			// Start cleanup if not in dev mode
 			if (!config.is_dev) {
@@ -532,6 +528,12 @@ export class DualMailer {
 					html: html_data,
 					reply_to
 				} = payload;
+				if (!from) {
+					throw new EmailError(
+						'No "from" email address is provided. Either set the "noreply_email" in the config or include a "from" address in the payload.',
+						EMAIL_ERROR_CODES.CONFIGURATION
+					);
+				}
 
 				const html = this.#create_html_email(html_data);
 				const transporter = await this.#get_transporter();
