@@ -18,7 +18,8 @@ describe('Transport Management', () => {
 	let mock_is_idle;
 	const basic_config = {
 		host: 'smtp.test.com',
-		port: 587
+		port: 587,
+		noreply_email: 'noreply_test@example.com'
 	};
 
 	beforeEach(() => {

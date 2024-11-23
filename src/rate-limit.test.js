@@ -28,7 +28,8 @@ describe('DualMailer Rate Limiting', () => {
 
 	const basic_smtp_config = {
 		host: 'smtp.test.com',
-		port: 587
+		port: 587,
+		noreply_email: 'noreply_test@example.com'
 	};
 
 	afterEach(async function () {

@@ -35,12 +35,14 @@ describe('DualMailer', () => {
 	// Different configuration scenarios
 	const mailgun_config = {
 		mailgun_api_key: 'test-key',
-		mailgun_domain: 'test.com'
+		mailgun_domain: 'test.com',
+		noreply_email: 'noreply_test@example.com'
 	};
 
 	const basic_smtp_config = {
 		host: 'smtp.test.com',
-		port: 587
+		port: 587,
+		noreply_email: 'noreply_test@example.com'
 	};
 
 	const authenticated_smtp_config = {
