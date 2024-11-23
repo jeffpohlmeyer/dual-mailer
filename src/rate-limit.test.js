@@ -113,7 +113,8 @@ describe('DualMailer Rate Limiting', () => {
 			{
 				mailgun_api_key: 'test_api_key',
 				mailgun_domain: 'test.domain.com',
-				is_dev: false
+				is_dev: false,
+				noreply_email: 'noreply_test@example.com'
 			},
 			{
 				rate_limit: {
