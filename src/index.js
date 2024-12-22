@@ -57,11 +57,10 @@ import mg from 'nodemailer-mailgun-transport';
  * Custom error class for email-related errors
  */
 export class EmailError extends Error {
-	constructor(message, code, originalError = null) {
+	constructor(message, code) {
 		super(message);
 		this.name = 'EmailError';
 		this.code = code;
-		this.originalError = originalError;
 	}
 }
 
