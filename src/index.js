@@ -519,9 +519,11 @@ export class DualMailer {
 
 				const {
 					to,
-					from = this.#config.noreply_email
-						? `No Reply <${this.#config.noreply_email}>`
-						: undefined,
+					from = payload.from
+						? payload.from
+						: this.#config.noreply_email
+							? `No Reply <${this.#config.noreply_email}>`
+							: undefined,
 					subject,
 					text,
 					html: html_data,
