@@ -46,13 +46,13 @@ export interface EmailDataType {
 	from?: string;
 	html: EmailHtmlType;
 	reply_to?: string;
-	icalEvent: IcalAttachment;
+	ical_event?: IcalAttachment;
 }
 
 export interface RetryConfig {
-	maxRetries?: number;
-	retryDelay?: number;
-	retryableErrors?: string[];
+	max_retries?: number;
+	retry_delay?: number;
+	retryable_errors?: string[];
 }
 
 export interface RateLimitConfig {
@@ -71,7 +71,7 @@ export interface MailerOptions {
 
 export class EmailError extends Error {
 	code: string;
-	originalError: Error | null;
+	original_error: Error | null;
 	constructor(message: string, code: string, originalError?: Error | null);
 }
 

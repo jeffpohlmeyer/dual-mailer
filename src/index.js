@@ -41,9 +41,9 @@ import mg from 'nodemailer-mailgun-transport';
 
 /**
  * @typedef {Object} RetryConfig
- * @property {number} [maxRetries=3] - Maximum number of retry attempts
- * @property {number} [retryDelay=1000] - Initial delay between retries in ms (doubles each retry)
- * @property {string[]} [retryableErrors=[]] - List of error messages to retry on (empty means retry all)
+ * @property {number} [max_retries=3] - Maximum number of retry attempts
+ * @property {number} [retry_delay=1000] - Initial delay between retries in ms (doubles each retry)
+ * @property {string[]} [retryable_errors=[]] - List of error messages to retry on (empty means retry all)
  */
 
 /**
@@ -515,9 +515,9 @@ export class DualMailer {
 
 		const should_retry = (error, attempt) => {
 			if (!this.#retry_enabled) return false;
-			if (attempt > (this.#retry.maxRetries ?? 3)) return false;
-			if (!this.#retry.retryableErrors?.length) return true;
-			return this.#retry.retryableErrors.some((msg) => error.message.includes(msg));
+			if (attempt > (this.#retry.max_retries ?? 3)) return false;
+			if (!this.#retry.retryable_errors?.length) return true;
+			return this.#retry.retryable_errors.some((msg) => error.message.includes(msg));
 		};
 
 		const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -586,7 +586,7 @@ export class DualMailer {
 					this.#update_transporter_metrics(false);
 
 					if (should_retry(error, attempt)) {
-						const delay = (this.#retry.retryDelay ?? 1000) * Math.pow(2, attempt - 1);
+						const delay = (this.#retry.retry_delay ?? 1000) * Math.pow(2, attempt - 1);
 						this.#logger('warn', 'Email send failed, retrying', {
 							error: error.message,
 							attempt,
