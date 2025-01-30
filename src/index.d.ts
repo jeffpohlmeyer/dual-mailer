@@ -2,7 +2,7 @@ import { Readable } from 'stream';
 import { Url } from 'url';
 
 /**
- * The following two interfaces were pulled from @types/nodemailer
+ * The following two interfaces were pulled from @types/nodemailer.
  */
 interface AttachmentLike {
 	/** String, Buffer or a Stream contents for the attachment */
