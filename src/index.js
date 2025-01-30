@@ -21,6 +21,14 @@ import mg from 'nodemailer-mailgun-transport';
  */
 
 /**
+ * @typedef {Object} IcalAttachment
+ * @property {string} filename - Name of the .ics file
+ * @property {string} method - iCal method (REQUEST, CANCEL, etc.)
+ * @property {string} content - The iCal content string
+ * @property {string} [encoding='8bit'] - Encoding for the attachment
+ */
+
+/**
  * @typedef {Object} EmailDataType
  * @property {string} to
  * @property {string} subject
@@ -28,6 +36,7 @@ import mg from 'nodemailer-mailgun-transport';
  * @property {string} [from]
  * @property {EmailHtmlType} html
  * @property {string} [reply_to]
+ * @property {IcalAttachment} [ical_event] - Optional iCal calendar event attachment
  */
 
 /**
@@ -527,7 +536,8 @@ export class DualMailer {
 					subject,
 					text,
 					html: html_data,
-					reply_to
+					reply_to,
+					ical_event: icalEvent
 				} = payload;
 				if (!from) {
 					throw new EmailError(
@@ -543,11 +553,20 @@ export class DualMailer {
 					to,
 					subject,
 					transport: transport_type,
-					attempt
+					attempt,
+					has_calendar: Boolean(icalEvent)
 				});
 
 				try {
-					await transporter.sendMail({ from, to, subject, text, html, reply_to });
+					await transporter.sendMail({
+						from,
+						to,
+						subject,
+						text,
+						html,
+						reply_to,
+						...(icalEvent && { icalEvent })
+					});
 
 					// Update metrics and log success
 					const duration = Date.now() - start_time;
@@ -556,7 +575,8 @@ export class DualMailer {
 						subject,
 						transport: transport_type,
 						duration_ms: duration,
-						attempts: attempt
+						attempts: attempt,
+						has_calendar: Boolean(icalEvent)
 					});
 
 					this.#update_transporter_metrics(true);
@@ -584,7 +604,8 @@ export class DualMailer {
 							error: error.message,
 							content: text ?? html,
 							transport: transport_type,
-							attempts: attempt
+							attempts: attempt,
+							has_calendar: Boolean(icalEvent)
 						});
 					}
 

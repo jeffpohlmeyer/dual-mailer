@@ -1,3 +1,27 @@
+import { Readable } from 'stream';
+import { Url } from 'url';
+
+/**
+ * The following two interfaces were pulled from @types/nodemailer
+ */
+interface AttachmentLike {
+	/** String, Buffer or a Stream contents for the attachment */
+	content?: string | Buffer | Readable | undefined;
+	/** path to a file or an URL (data uris are allowed as well) if you want to stream the file instead of including it (better for larger attachments) */
+	path?: string | Url | undefined;
+}
+
+interface IcalAttachment extends AttachmentLike {
+	/** optional method, case insensitive, defaults to ‘publish’. Other possible values would be ‘request’, ‘reply’, ‘cancel’ or any other valid calendar method listed in RFC5546. This should match the METHOD: value in calendar event file. */
+	method?: string | undefined;
+	/** optional filename, defaults to ‘invite.ics’ */
+	filename?: string | false | undefined;
+	/** is an alternative for content to load the calendar data from an URL */
+	href?: string | undefined;
+	/** defines optional content encoding, eg. ‘base64’ or ‘hex’. This only applies if the content is a string. By default an unicode string is assumed. */
+	encoding?: string | undefined;
+}
+
 export interface MailConfig {
 	mailgun_api_key?: string;
 	mailgun_domain?: string;
@@ -22,6 +46,7 @@ export interface EmailDataType {
 	from?: string;
 	html: EmailHtmlType;
 	reply_to?: string;
+	icalEvent: IcalAttachment;
 }
 
 export interface RetryConfig {
