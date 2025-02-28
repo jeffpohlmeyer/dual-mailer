@@ -564,7 +564,7 @@ export class DualMailer {
 						subject,
 						text,
 						html,
-						reply_to,
+						replyTo: reply_to,
 						...(icalEvent && { icalEvent })
 					});
 
